@@ -12,6 +12,86 @@ import (
 	"github.com/starboard-nz/lockunique"
 )
 
+func Benchmark1point6mill(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		b.Run("1.6 million locks", func(b *testing.B) {
+			// test taking 1.6 million locks
+			l := lockunique.NewLockUnique[int64]()
+			totalLocks := 1600000
+			//	Create a map of 1.6 million vessels
+			for i := 0; i < totalLocks; i++ {
+				// lock all of them
+				l.Lock(int64(i))
+			}
+
+			// now unlock all of them
+			for i := 0; i < totalLocks; i++ {
+				err := l.Unlock(int64(i))
+				if err != nil {
+					b.Errorf("err = %v", err)
+				}
+			}
+		})
+		b.Run("1.6 million locks unlocks (map version)", func(b *testing.B) {
+			// test taking 1.6 million locks
+			lockMap := make(map[int64]*sync.Mutex)
+			totalLocks := 1600000
+			//	Create a map of 1.6 million vessels
+			for i := 0; i < totalLocks; i++ {
+				// create the lock
+				lockMap[int64(i)] = &sync.Mutex{}
+				lockMap[int64(i)].Lock()
+			}
+
+			// now unlock all of them
+			for i := 0; i < totalLocks; i++ {
+				lockMap[int64(i)].Unlock()
+			}
+		})
+
+	}
+}
+
+func BenchmarkBasic(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		l := lockunique.NewLockUnique[int32]()
+
+		const maxID = 1000
+
+		var n [maxID]int32
+
+		wg := &sync.WaitGroup{}
+
+		for i := 0; i < 100000; i++ {
+			wg.Add(1)
+			vID := rand.Int31n(maxID-1) + 1
+
+			if i%1000 == 0 {
+				// makes it keep switching back to an array as the queue clears
+				time.Sleep(50 * time.Millisecond)
+			}
+
+			go func(vID int32) {
+				l.Lock(vID)
+				n0 := atomic.AddInt32(&(n[vID-1]), 1)
+				if n0 != 1 {
+					b.Errorf("n0 = %d", n0)
+				}
+				time.Sleep(2 * time.Millisecond)
+				n0 = atomic.AddInt32(&(n[vID-1]), -1)
+				if n0 != 0 {
+					b.Errorf("n0 = %d", n0)
+				}
+
+				l.Unlock(vID)
+				wg.Done()
+			}(vID)
+		}
+
+		wg.Wait()
+	}
+}
+
 func TestMain(m *testing.M) {
 	go RunDebugServer(8888)
 
