@@ -12,7 +12,7 @@ var ErrNotLocked = errors.New("id not locked")
 
 type lockID[T comparable] struct {
 	id       T
-	queue    chan struct{}
+	queue    int32
 	unlocked chan struct{}
 }
 
@@ -58,27 +58,8 @@ func (l *LockUnique[T]) Lock(id T) {
 
 	if lock != nil {
 		// id is locked already
-		queued := make(chan struct{}, 1)
-
-		select {
-		case lock.queue <- struct{}{}:
-			// successfully added to the queue
-			queued <- struct{}{}
-		default:
-			// queue is full, try adding it in the background
-			go func(lock *lockID[T]) {
-				// take the next spot in the queue
-				lock.queue <- struct{}{}
-
-				// successfully entered the queue
-				queued <- struct{}{}
-			}(lock)
-		}
-
+		lock.queue++
 		l.mu.Unlock()
-
-		// wait to enter the queue
-		<-queued
 
 		// wait for the current lock to be deleted
 		<-lock.unlocked
@@ -89,7 +70,6 @@ func (l *LockUnique[T]) Lock(id T) {
 	// if we are there, there is no current lock for this id
 	lock = &lockID[T]{
 		id:       id,
-		queue:    make(chan struct{}, 5), // current job and up to 4 more waiting
 		unlocked: make(chan struct{}, 1), // cap of 1 so the unlocker never has to wait
 	}
 
@@ -121,7 +101,7 @@ func (l *LockUnique[T]) Lock(id T) {
 	}
 
 	// take first place in the queue
-	lock.queue <- struct{}{}
+	lock.queue = 1
 	l.mu.Unlock()
 }
 
@@ -136,9 +116,9 @@ func (l *LockUnique[T]) Unlock(id T) error {
 			return fmt.Errorf("%w: id = %v", ErrNotLocked, id)
 		}
 		// remove this lock from the queue
-		<-lock.queue
+		lock.queue--
 
-		if len(lock.queue) == 0 {
+		if lock.queue == 0 {
 			delete(l.lockMap, id)
 
 			if len(l.lockMap) < maxArraySize / 2 {
@@ -165,9 +145,9 @@ func (l *LockUnique[T]) Unlock(id T) error {
 	for i := 0; i < l.nextFree; i++ {
 		if l.lockArr[i].id == id {
 			// remove this lock from the queue
-			<-l.lockArr[i].queue
+			l.lockArr[i].queue--
 
-			if len(l.lockArr[i].queue) == 0 {
+			if l.lockArr[i].queue == 0 {
 				// no other locks waiting for this ID, remove from locks
 				if i == l.nextFree-1 {
 					l.lockArr[i] = nil

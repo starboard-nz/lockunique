@@ -95,7 +95,7 @@ func TestLockUnlock(t *testing.T) {
 			if n0 != 1 {
 				t.Errorf("n0 = %d", n0)
 			}
-			time.Sleep(2 * time.Millisecond)
+			//time.Sleep(2 * time.Millisecond)
 			n0 = atomic.AddInt32(&(n[vID-1]), -1)
 			if n0 != 0 {
 				t.Errorf("n0 = %d", n0)
@@ -140,4 +140,56 @@ func TestLockUnlock2(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestLockUnlockSameID(t *testing.T) {
+	l := lockunique.NewLockUnique[int32]()
+	id := int32(123)
+
+	var (
+		locking, unlocking int32
+	)
+
+	count := 100000
+	wg := &sync.WaitGroup{}
+	queue := make(chan struct{}, 10)
+
+	i := 0
+	for ; i < count; i++ {
+		queue <-struct{}{}
+		wg.Add(1)
+
+		go func() {
+			l.Lock(id)
+			atomic.AddInt32(&locking, 1)
+
+			l.Unlock(id)
+			atomic.AddInt32(&unlocking, 1)
+
+			<-queue
+
+			wg.Done()
+		}()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		done <-struct{}{}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10*time.Second):
+		t.Logf("i = %d; locking = %d; unlocking = %d", i, locking, unlocking)
+		t.Errorf("Timed out.")
+	}
+
+	if locking != int32(count) {
+		t.Errorf("incorrect result")
+	}
+
+	if unlocking != int32(count) {
+		t.Errorf("incorrect result")
+	}
 }
