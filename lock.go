@@ -89,7 +89,7 @@ func (l *LockUnique[T]) Lock(id T) {
 	// if we are there, there is no current lock for this id
 	lock = &lockID[T]{
 		id:       id,
-		queue:    make(chan struct{}, 2), // 2 IDs, one for the current job and one for the next one waiting, if any
+		queue:    make(chan struct{}, 5), // current job and up to 4 more waiting
 		unlocked: make(chan struct{}, 1), // cap of 1 so the unlocker never has to wait
 	}
 
